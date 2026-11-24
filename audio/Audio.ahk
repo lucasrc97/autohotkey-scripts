@@ -4,8 +4,9 @@ Persistent
 
 ; ==============================================================================
 ;  AUDIO
-;  Mudo de microfones, apps (som e microfone) e sistema, com janela de
-;  configuração. Configurações salvas em Audio.ini (mesma pasta).
+;  Mudo e volume por app (som), mudo por app (microfone) e mudo dos
+;  microfones, com atalhos e uma janela de mixer. Configurações salvas em
+;  Audio.ini (mesma pasta).
 ;
 ;  O mudo do microfone é feito no próprio dispositivo (IAudioEndpointVolume),
 ;  igual ao botão "Mudo" do Windows: o dispositivo continua ativo, então o
@@ -33,22 +34,25 @@ ACOES := [
     {id: "AppMudo",    nome: "Selected apps: mute sound",      padrao: "^!n", fn: (*) => AlternarMudo("App")}
 ]
 
-; ---------- Listas de seleção da janela ----------
-; ctrl = nome do controle na janela | cfg = propriedade em Cfg | ini = seção no Audio.ini
-LISTAS := [
-    {ctrl: "Mics",    cfg: "mics",    ini: "Mics",    todosPadrao: 1},
-    {ctrl: "Apps",    cfg: "apps",    ini: "Apps",    todosPadrao: 0},
-    {ctrl: "AppsMic", cfg: "appsMic", ini: "AppsMic", todosPadrao: 0}
-]
+; ---------- Apps que cada atalho controla ----------
+; cfg = conjunto em Cfg | todos = "atalho vale para todos os apps" | ini = seção no Audio.ini
+LISTAS := Map(
+    "out", {cfg: "apps",    todos: "todosApps",    ini: "Apps",    atalho: "AppMudo"},
+    "in",  {cfg: "appsMic", todos: "todosAppsMic", ini: "AppsMic", atalho: "AppMicMudo"}
+)
 
 TEMAS := ["system", "light", "dark"]   ; ordem igual à da lista na janela
+
+; Ícones da fonte Segoe MDL2 Assets (vem com o Windows 10/11)
+ICO_SOM := Chr(0xE767), ICO_MUDO := Chr(0xE74F), ICO_MIC := Chr(0xE720), ICO_MIC_MUDO := Chr(0xF781), ICO_CAIXA := Chr(0xE7F5)
 
 ; ---------- Início ----------
 Cfg := ConfigCarregar()
 Janela := ""
 Abas := [], Paginas := [], PaginaAtual := 1
+Linhas := Map()            ; "tipo|chave" -> controles de uma linha da janela
+Assinatura := ""           ; quais linhas a janela tem; se mudar, a janela é refeita
 Escuro := false
-Preenchendo := false      ; evita salvar enquanto as listas da janela são montadas
 
 AplicarModoApp()
 MontarBandeja()
@@ -62,11 +66,11 @@ return
 ;  AÇÕES
 ; ==============================================================================
 
-; Se algum item do alvo estiver ativo, muta todos; se todos estiverem mudos, desmuta todos.
+; Atalhos e bandeja. Se algum item estiver ativo, muta todos; se todos estiverem mudos, desmuta.
 AlternarMudo(tipo) {
     a := Alvo(tipo)
     if !a.vols.Length
-        return Avisar(a.nome ": " "NOTHING FOUND", "Yellow")
+        return Avisar(a.nome ": NOTHING FOUND", "Yellow")
 
     mudo := !TodosMudos(a)
     for v in a.vols
@@ -78,30 +82,20 @@ AlternarMudo(tipo) {
     AposMudanca()
 }
 
-AposMudanca() {
-    BandejaAtualizar()
-    if JanelaVisivel()
-        JanelaRecarregar()
-}
-
 ; Monta o alvo de uma ação: nome exibido, tipo de interface (vt) e controles de volume.
 Alvo(tipo) {
     vols := []
     switch tipo {
     case "Mic":
         for d in Dispositivos(ENTRADA)
-            if Cfg.todosMics || Cfg.mics.Has(d.id)
-                vols.Push(Ativar(d.dev, IID_ENDPOINT))
+            vols.Push(Ativar(d.dev, IID_ENDPOINT))
         return {nome: "MICROPHONES", vt: VT_ENDPOINT, vols: vols}
     case "App", "AppMic":
-        mic := (tipo = "AppMic")
-        for s in Sessoes(mic ? ENTRADA : SAIDA)
-            if (mic ? Cfg.todosAppsMic || Cfg.appsMic.Has(s.exe) : Cfg.todosApps || Cfg.apps.Has(s.exe))
+        l := LISTAS[tipo = "App" ? "out" : "in"]
+        for s in Sessoes(tipo = "App" ? SAIDA : ENTRADA)
+            if Cfg.%l.todos% || Cfg.%l.cfg%.Has(s.exe)
                 vols.Push(s.vol)
-        return {nome: mic ? "APPS (MIC)" : "APPS (SOUND)", vt: VT_APP, vols: vols}
-    case "Sistema":
-        try vols.Push(Ativar(SaidaPadrao(), IID_ENDPOINT))
-        return {nome: "SYSTEM", vt: VT_ENDPOINT, vols: vols}
+        return {nome: tipo = "App" ? "APPS (SOUND)" : "APPS (MIC)", vt: VT_APP, vols: vols}
     }
 }
 
@@ -110,6 +104,53 @@ TodosMudos(a) {
         if !LerMudo(a.vt, v)
             return false
     return true
+}
+
+AposMudanca() {
+    BandejaAtualizar()
+    if JanelaVisivel()
+        AtualizarJanela()
+}
+
+; Controles de volume de uma linha da janela.
+;   sis = saída padrão | mic = microfone (id) | out = som do app (exe) | in = microfone do app (exe)
+VolsDaLinha(tipo, chave) {
+    vols := []
+    switch tipo {
+    case "sis":
+        try vols.Push(Ativar(SaidaPadrao(), IID_ENDPOINT))
+    case "mic":
+        for d in Dispositivos(ENTRADA)
+            if (d.id = chave)
+                vols.Push(Ativar(d.dev, IID_ENDPOINT))
+    case "out", "in":
+        for s in Sessoes(tipo = "in" ? ENTRADA : SAIDA)
+            if (s.exe = chave)
+                vols.Push(s.vol)
+    }
+    return vols
+}
+
+VtDe(tipo) => (tipo = "sis" || tipo = "mic") ? VT_ENDPOINT : VT_APP
+
+LinhaMudo(tipo, chave, *) {
+    a := {vt: VtDe(tipo), vols: VolsDaLinha(tipo, chave)}
+    if !a.vols.Length
+        return
+    mudo := !TodosMudos(a)
+    for v in a.vols
+        ComCall(a.vt.setMute, v, "Int", mudo, "Ptr", 0)
+    AposMudanca()
+}
+
+LinhaVolume(tipo, chave, slider, *) {
+    vt := VtDe(tipo)
+    for v in VolsDaLinha(tipo, chave)
+        ComCall(vt.setVol, v, "Float", slider.Value / 100, "Ptr", 0)
+    l := Linhas[tipo "|" chave]
+    l.item.vol := slider.Value
+    if !l.item.mudo
+        l.estado.Value := slider.Value "%"
 }
 
 
@@ -176,7 +217,7 @@ ChaveNomeAmigavel() {   ; PKEY_Device_FriendlyName
     return k
 }
 
-; Sessões de áudio dos apps em todos os dispositivos do fluxo -> [{exe, vol}]
+; Sessões de áudio dos apps em todos os dispositivos do fluxo -> [{exe, pid, vol}]
 ;   SAIDA   = som que o app toca (caixas/fones)
 ;   ENTRADA = microfone que o app está captando
 Sessoes(fluxo) {
@@ -201,7 +242,7 @@ Sessoes(fluxo) {
             try exe := StrLower(ProcessGetName(pid))
             catch
                 continue                                            ; processo já encerrado
-            lista.Push({exe: exe, vol: ComObjQuery(ctl2, IID_VOL_APP)})
+            lista.Push({exe: exe, pid: pid, vol: ComObjQuery(ctl2, IID_VOL_APP)})
         }
     }
     return lista
@@ -223,6 +264,118 @@ Guid(texto, tamanho := 16) {
     b := Buffer(tamanho, 0)
     DllCall("ole32\CLSIDFromString", "WStr", texto, "Ptr", b, "HRESULT")
     return b
+}
+
+
+; ==============================================================================
+;  ESTADO ATUAL (o que a janela mostra)
+; ==============================================================================
+
+; -> {sis, mics[], out[], inp[]}; cada item: {tipo, chave, nome, icone, mudo, vol, presente}
+LerEstado() {
+    e := {sis: "", mics: [], out: [], inp: []}
+    try {
+        dev := SaidaPadrao(), v := Ativar(dev, IID_ENDPOINT)
+        e.sis := {tipo: "sis", chave: "", nome: DispositivoNome(dev), icone: "", presente: true,
+                  mudo: LerMudo(VT_ENDPOINT, v), vol: Round(LerVolume(VT_ENDPOINT, v) * 100)}
+    }
+    for d in Dispositivos(ENTRADA) {
+        v := Ativar(d.dev, IID_ENDPOINT)
+        e.mics.Push({tipo: "mic", chave: d.id, nome: d.nome, icone: "", presente: true,
+                     mudo: LerMudo(VT_ENDPOINT, v), vol: 0})
+    }
+    e.out := ItensApps("out", SAIDA)
+    e.inp := ItensApps("in", ENTRADA)
+    return e
+}
+
+; Uma linha por .exe (um app pode ter várias sessões). Apps marcados que não estão
+; usando áudio agora também aparecem, como "not running", para poder desmarcar.
+ItensApps(tipo, fluxo) {
+    porExe := Map()
+    for s in Sessoes(fluxo) {
+        mudo := LerMudo(VT_APP, s.vol), vol := Round(LerVolume(VT_APP, s.vol) * 100)
+        if porExe.Has(s.exe) {
+            it := porExe[s.exe]
+            it.mudo := it.mudo && mudo                  ; mudo só se todas as sessões estiverem
+            it.vol := Max(it.vol, vol)
+        } else {
+            info := InfoApp(s.exe, s.pid)
+            porExe[s.exe] := {tipo: tipo, chave: s.exe, nome: info.nome, icone: info.caminho,
+                              presente: true, mudo: mudo, vol: vol}
+        }
+    }
+    lista := []
+    for , it in porExe
+        lista.Push(it)
+    for exe in Cfg.%LISTAS[tipo].cfg%
+        if !porExe.Has(exe) {
+            info := InfoApp(exe, 0)
+            lista.Push({tipo: tipo, chave: exe, nome: info.nome, icone: info.caminho,
+                        presente: false, mudo: false, vol: 0})
+        }
+    return lista
+}
+
+TodosItens(e) {
+    lista := e.sis ? [e.sis] : []
+    for grupo in [e.mics, e.out, e.inp]
+        for it in grupo
+            lista.Push(it)
+    return lista
+}
+
+AssinaturaDe(e) {
+    s := ""
+    for it in TodosItens(e)
+        s .= "|" it.tipo ":" it.chave ":" it.presente
+    return s
+}
+
+; Nome amigável ("Google Chrome" em vez de chrome.exe) e caminho do .exe para o ícone.
+; Fica guardado no Audio.ini para apps marcados que não estão abertos.
+InfoApp(exe, pid) {
+    static cache := Map()
+    if cache.Has(exe)
+        return cache[exe]
+    salvo := IniRead(ARQ_INI, "Info", exe, "")
+    partes := StrSplit(salvo, "|")
+    nome := partes.Length ? partes[1] : "", caminho := partes.Length > 1 ? partes[2] : ""
+    if pid {
+        try caminho := ProcessGetPath(pid)
+        if (caminho != "")
+            nome := DescricaoArquivo(caminho) || nome
+    }
+    if (nome = "")
+        nome := NomeSimples(exe)
+    info := {nome: nome, caminho: (caminho != "" && FileExist(caminho)) ? caminho : ""}
+    if pid {
+        cache[exe] := info
+        if (nome "|" caminho != salvo)
+            IniWrite(nome "|" caminho, ARQ_INI, "Info", exe)
+    }
+    return info
+}
+
+NomeSimples(exe) {   ; "chrome.exe" -> "Chrome"
+    n := RegExReplace(exe, "i)\.exe$")
+    return StrUpper(SubStr(n, 1, 1)) SubStr(n, 2)
+}
+
+DescricaoArquivo(caminho) {   ; FileDescription do .exe, "" se não tiver
+    tam := DllCall("version\GetFileVersionInfoSizeW", "Str", caminho, "Ptr", 0, "UInt")
+    if !tam
+        return ""
+    buf := Buffer(tam)
+    if !DllCall("version\GetFileVersionInfoW", "Str", caminho, "UInt", 0, "UInt", tam, "Ptr", buf)
+        return ""
+    p := 0, n := 0
+    if !DllCall("version\VerQueryValueW", "Ptr", buf, "Str", "\VarFileInfo\Translation", "Ptr*", &p, "UInt*", &n) || n < 4
+        return ""
+    idioma := Format("{:04X}{:04X}", NumGet(p, 0, "UShort"), NumGet(p, 2, "UShort"))
+    if DllCall("version\VerQueryValueW", "Ptr", buf, "Str", "\StringFileInfo\" idioma "\FileDescription", "Ptr*", &p, "UInt*", &n) && n > 1
+        return Trim(StrGet(p))
+    return ""
 }
 
 
@@ -258,6 +411,17 @@ RegistrarAtalhos(atalhos) {
     return erros = ""
 }
 
+; "^!n" -> "Ctrl+Alt+N"
+AtalhoTexto(tecla) {
+    static mods := Map("^", "Ctrl", "!", "Alt", "+", "Shift", "#", "Win")
+    texto := ""
+    while (StrLen(tecla) > 1 && mods.Has(SubStr(tecla, 1, 1))) {
+        texto .= mods[SubStr(tecla, 1, 1)] "+"
+        tecla := SubStr(tecla, 2)
+    }
+    return texto (StrLen(tecla) = 1 ? StrUpper(tecla) : tecla)
+}
+
 
 ; ==============================================================================
 ;  CONFIGURAÇÃO (Audio.ini)
@@ -272,9 +436,9 @@ ConfigCarregar() {
     }
     if !Posicao(TEMAS, c.tema)
         c.tema := "system"
-    for l in LISTAS {
-        c.%"todos" l.ctrl% := IniRead(ARQ_INI, l.ini, "Todos", l.todosPadrao)
-        c.%l.cfg%       := Conjunto(IniRead(ARQ_INI, l.ini, "Selecionados", ""))
+    for , l in LISTAS {
+        c.%l.todos% := IniRead(ARQ_INI, l.ini, "Todos", 0)
+        c.%l.cfg%   := Conjunto(IniRead(ARQ_INI, l.ini, "Selecionados", ""))
     }
     for a in ACOES
         c.atalhos[a.id] := IniRead(ARQ_INI, "Atalhos", a.id, a.padrao)
@@ -282,12 +446,12 @@ ConfigCarregar() {
 }
 
 ConfigSalvar() {
-    IniWrite(Cfg.bip,    ARQ_INI, "Geral", "Bip")
-    IniWrite(Cfg.aviso,  ARQ_INI, "Geral", "Aviso")
-    IniWrite(Cfg.tema,   ARQ_INI, "Geral", "Tema")
-    for l in LISTAS {
-        IniWrite(Cfg.%"todos" l.ctrl%,     ARQ_INI, l.ini, "Todos")
-        IniWrite(Juntar(Cfg.%l.cfg%),   ARQ_INI, l.ini, "Selecionados")
+    IniWrite(Cfg.bip,   ARQ_INI, "Geral", "Bip")
+    IniWrite(Cfg.aviso, ARQ_INI, "Geral", "Aviso")
+    IniWrite(Cfg.tema,  ARQ_INI, "Geral", "Tema")
+    for , l in LISTAS {
+        IniWrite(Cfg.%l.todos%,       ARQ_INI, l.ini, "Todos")
+        IniWrite(Juntar(Cfg.%l.cfg%), ARQ_INI, l.ini, "Selecionados")
     }
     for a in ACOES
         IniWrite(Cfg.atalhos[a.id], ARQ_INI, "Atalhos", a.id)
@@ -331,9 +495,9 @@ TemaEscuro() {
 
 Paleta() {
     if Escuro
-        return {bg: "202020", fg: "E8E8E8", sutil: "9A9A9A", lista: "2B2B2B",
+        return {bg: "202020", fg: "E8E8E8", sutil: "9A9A9A", mudo: "FF6B6B", ativo: "4CC38A",
                 abaBg: "2B2B2B", abaFg: "B0B0B0", abaAtivaBg: "0078D4", abaAtivaFg: "FFFFFF"}
-    return {bg: "", fg: "000000", sutil: "666666", lista: "",
+    return {bg: "", fg: "000000", sutil: "6E6E6E", mudo: "C42B1C", ativo: "107C10",
             abaBg: "E1E1E1", abaFg: "333333", abaAtivaBg: "0078D4", abaAtivaFg: "FFFFFF"}
 }
 
@@ -369,46 +533,18 @@ EscurecerJanela(g) {
         switch c.Type {
         case "Button":
             TemaControle(c.Hwnd, "DarkMode_Explorer")
-        case "ListView":
-            TemaControle(c.Hwnd, "DarkMode_Explorer")
-            cabecalho := SendMessage(0x101F, 0, 0, c)                        ; LVM_GETHEADER
-            TemaControle(cabecalho, "DarkMode_ItemsView")
-            ClarearCabecalho(c.Hwnd, cabecalho)
         case "DDL":
             TemaControle(c.Hwnd, "DarkMode_CFD")
         case "Checkbox":
-            ; sem tema visual o texto da caixa respeita a cor da fonte (senão fica preto)
-            DllCall("uxtheme\SetWindowTheme", "Ptr", c.Hwnd, "Str", "", "Str", "")
+            if (c.Text = "")
+                TemaControle(c.Hwnd, "DarkMode_Explorer")
+            else   ; sem tema visual o texto da caixa respeita a cor da fonte (senão fica preto)
+                DllCall("uxtheme\SetWindowTheme", "Ptr", c.Hwnd, "Str", "", "Str", "")
         }
     }
 }
 
-; O tema escuro deixa o texto do cabeçalho da lista quase preto. A lista recebe o
-; NM_CUSTOMDRAW do cabeçalho; uma subclasse troca a cor do texto antes de desenhar.
-ClarearCabecalho(hwndLista, hwndCabecalho) => DllCall("comctl32\SetWindowSubclass", "Ptr", hwndLista, "Ptr", CabecalhoCallback(), "UPtr", 1, "UPtr", hwndCabecalho)
-
-CabecalhoCallback() {
-    static cb := CallbackCreate(CabecalhoSubclasse, , 6)
-    return cb
-}
-
-CabecalhoSubclasse(hwnd, msg, wParam, lParam, id, cabecalho) {
-    if (msg = 0x4E && NumGet(lParam, 0, "Ptr") = cabecalho
-        && NumGet(lParam, 2 * A_PtrSize, "Int") = -12) {                  ; WM_NOTIFY, NM_CUSTOMDRAW
-        estagio := NumGet(lParam, 3 * A_PtrSize, "UInt")
-        if (estagio = 1)                                                    ; CDDS_PREPAINT
-            return 0x20                                                     ; CDRF_NOTIFYITEMDRAW
-        if (estagio = 0x10001) {                                            ; CDDS_ITEMPREPAINT
-            DllCall("gdi32\SetTextColor", "Ptr", NumGet(lParam, 4 * A_PtrSize, "Ptr"), "UInt", 0xD0D0D0)
-            return 0                                                        ; CDRF_DODEFAULT
-        }
-    }
-    if (msg = 0x82)                                                         ; WM_NCDESTROY
-        DllCall("comctl32\RemoveWindowSubclass", "Ptr", hwnd, "Ptr", CabecalhoCallback(), "UPtr", id)
-    return DllCall("comctl32\DefSubclassProc", "Ptr", hwnd, "UInt", msg, "UPtr", wParam, "Ptr", lParam, "Ptr")
-}
-
-TemaControle(hwnd, nome) =>DllCall("uxtheme\SetWindowTheme", "Ptr", hwnd, "Str", nome, "Ptr", 0)
+TemaControle(hwnd, nome) => DllCall("uxtheme\SetWindowTheme", "Ptr", hwnd, "Str", nome, "Ptr", 0)
 
 
 ; ==============================================================================
@@ -418,29 +554,43 @@ TemaControle(hwnd, nome) =>DllCall("uxtheme\SetWindowTheme", "Ptr", hwnd, "Str",
 JanelaMostrar() {
     global Janela
     if !Janela
-        Janela := JanelaCriar()
-    JanelaRecarregar()
+        Janela := JanelaCriar(LerEstado())
     Janela.Show()
+    AtualizarJanela()
+    SetTimer(AtualizarJanela, 1500)     ; mantém volumes e estados em dia enquanto aberta
 }
 
 JanelaVisivel() => Janela && DllCall("IsWindowVisible", "Ptr", Janela.Hwnd)
 
-; Recria a janela (troca de tema), mantendo posição e aba.
+; Atualiza os valores da janela. Se apareceu ou sumiu um app/dispositivo, refaz a janela.
+AtualizarJanela() {
+    if !JanelaVisivel()
+        return SetTimer(AtualizarJanela, 0)
+    e := LerEstado()
+    if (AssinaturaDe(e) != Assinatura)
+        return SetTimer(JanelaReconstruir, -1)
+    for it in TodosItens(e)
+        LinhaAtualizar(Linhas[it.tipo "|" it.chave], it)
+}
+
+; Recria a janela (linhas novas, tema ou atalhos), mantendo posição e aba.
 JanelaReconstruir() {
     global Janela
     if !Janela
         return
-    visivel := JanelaVisivel()
+    visivel := JanelaVisivel(), ativa := WinActive("ahk_id " Janela.Hwnd)
     Janela.GetPos(&x, &y)
-    Janela.Destroy()
-    Janela := JanelaCriar()
-    JanelaRecarregar()
+    velha := Janela
+    Janela := JanelaCriar(LerEstado())
     if visivel
-        Janela.Show("x" x " y" y)
+        Janela.Show("x" x " y" y (ativa ? "" : " NA"))
+    velha.Destroy()
 }
 
-JanelaCriar() {
-    global Abas, Paginas
+; Geometria das linhas (largura do conteúdo: 428, margem: 16)
+;   [caixa] [mudo] [ícone] Nome ............ [===== volume =====]  50%
+JanelaCriar(e) {
+    global Abas, Paginas, Linhas := Map(), Assinatura := AssinaturaDe(e)
     P := Paleta()
     g := Gui(, "Audio")
     g.SetFont("s10 c" P.fg, "Segoe UI")
@@ -450,53 +600,66 @@ JanelaCriar() {
 
     ; Abas desenhadas com Text (o controle Tab do Windows não tem modo escuro)
     Abas := []
-    for i, nome in ["Microphone", "Mixer", "Settings"] {
-        aba := g.Add("Text", (i = 1 ? "x10 y10" : "x+2 yp") " w140 h30 Center 0x200", nome)   ; 0x200 = centraliza na vertical
+    for i, nome in ["Sound", "Microphone", "Settings"] {
+        aba := g.Add("Text", (i = 1 ? "x16 y12" : "x+2 yp") " w140 h30 Center 0x200", nome)   ; 0x200 = centraliza na vertical
         aba.OnEvent("Click", MostrarPagina.Bind(i))
         Abas.Push(aba)
     }
     inicio := [Contar(g)]
 
-    ; --- Microfone: dispositivo inteiro + microfone por app ---
-    Titulo(g, "Devices — mute the whole microphone (all apps)", true)
-    CriarLista(g, "Mics", "All microphones", "Microphone", 130, P)
-    g.Add("Button", "xs w140", "Mute on/off").OnEvent("Click", (*) => AlternarMudo("Mic"))
-    g.Add("Button", "x+10 w140", "Refresh").OnEvent("Click", (*) => JanelaRecarregar())
-
-    Titulo(g, "Per app — microphone each app is capturing")
-    CriarLista(g, "AppsMic", "All apps", "App", 130, P)
-    g.Add("Button", "xs w140", "Mute on/off").OnEvent("Click", (*) => AlternarMudo("AppMic"))
-    g.Add("Button", "x+10 w140", "Refresh").OnEvent("Click", (*) => JanelaRecarregar())
+    ; --- Sound: saída padrão + som de cada app ---
+    y := 58
+    Secao(g, "Output device", y), y += 28
+    if e.sis
+        LinhaCriar(g, e.sis, y), y += 36
+    else
+        Vazio(g, "No audio output found.", y), y += 30
+    y += 10
+    Secao(g, "Apps", y)
+    EscolhaAtalho(g, "out", y - 3), y += 30
+    if !e.out.Length
+        Vazio(g, "No app is playing sound right now.", y), y += 30
+    for it in e.out
+        LinhaCriar(g, it, y), y += 34
     inicio.Push(Contar(g))
 
-    ; --- Mixer: sistema + som de cada app ---
-    Titulo(g, "System — default output (speakers/headphones)", true)
-    g.Add("Slider", "xs w490 Range0-100 ToolTip vSisVol").OnEvent("Change", (s, *) => (SoundSetVolume(s.Value), AtualizarSistema()))
-    g.Add("Text", "xs w490 vSisEstado")
-    g.Add("Button", "xs w140", "Mute on/off").OnEvent("Click", (*) => AlternarMudo("Sistema"))
-
-    Titulo(g, "Per app — sound each app plays")
-    CriarLista(g, "Apps", "All apps", "App", 200, P)
-    g.Add("Button", "xs w140", "Mute on/off").OnEvent("Click", (*) => AlternarMudo("App"))
-    g.Add("Button", "x+10 w140", "Refresh").OnEvent("Click", (*) => JanelaRecarregar())
+    ; --- Microphone: dispositivos + microfone de cada app ---
+    y := 58
+    Secao(g, "Microphones", y), y += 28
+    if !e.mics.Length
+        Vazio(g, "No microphone found.", y), y += 30
+    for it in e.mics
+        LinhaCriar(g, it, y), y += 34
+    y += 10
+    Secao(g, "Apps", y)
+    EscolhaAtalho(g, "in", y - 3), y += 30
+    if !e.inp.Length
+        Vazio(g, "No app is using the microphone right now.", y), y += 30
+    for it in e.inp
+        LinhaCriar(g, it, y), y += 34
+    g.Add("Text", "x16 y" (y + 8) " w428 c" P.sutil,
+        "Some apps, like Discord, link their microphone to the device mute: muting one also mutes the other.")
     inicio.Push(Contar(g))
 
-    ; --- Configurações: atalhos + opções ---
-    Titulo(g, "Hotkeys", true)
+    ; --- Settings: atalhos + opções ---
+    y := 58
+    Secao(g, "Hotkeys", y), y += 28
     for a in ACOES {
-        g.Add("Text", "xs y+" (A_Index = 1 ? 8 : 12) " w240", a.nome)
-        g.Add("Hotkey", "x+10 yp-3 w200 vHK_" a.id, Cfg.atalhos[a.id])
+        g.Add("Text", "x16 y" (y + 3) " w220", a.nome)
+        g.Add("Hotkey", "x246 y" y " w198 vHK_" a.id, Cfg.atalhos[a.id])
+        y += 32
     }
-
-    Titulo(g, "Options")
-    corLista := Escuro ? " Background" P.lista : ""
-    g.Add("Text", "xs y+8 w240", "Theme:")
-    g.Add("DropDownList", "x+10 yp-3 w200 vTema Choose" Posicao(TEMAS, Cfg.tema) corLista,
-        ["Follow system", "Light", "Dark"])
-    g.Add("Checkbox", "xs y+14 vBip Checked" Cfg.bip, "Beep on mute/unmute")
-    g.Add("Checkbox", "x+20 vAviso Checked" Cfg.aviso, "On-screen notice")
-    g.Add("Button", "xs y+16 w200", "Save").OnEvent("Click", SalvarOpcoes)
-    g.Add("Text", "xs y+10 w490 c" P.sutil, "To clear a hotkey: click the field and press Backspace.`nHotkeys are paused while this window is focused.")
+    y += 10
+    Secao(g, "Options", y), y += 28
+    g.Add("Text", "x16 y" (y + 3) " w220", "Theme:")
+    g.Add("DropDownList", "x246 y" y " w198 vTema Choose" Posicao(TEMAS, Cfg.tema), ["Follow system", "Light", "Dark"])
+    y += 36
+    g.Add("Checkbox", "x16 y" y " vBip Checked" Cfg.bip, "Beep on mute/unmute")
+    g.Add("Checkbox", "x246 y" y " vAviso Checked" Cfg.aviso, "On-screen notice")
+    y += 34
+    g.Add("Button", "x16 y" y " w140 h30", "Save").OnEvent("Click", SalvarOpcoes)
+    g.Add("Text", "x16 y" (y + 44) " w428 c" P.sutil,
+        "To clear a hotkey: click the field and press Backspace.`nHotkeys are paused while this window is focused.")
     inicio.Push(Contar(g))
 
     ; Separa os controles de cada página pela ordem em que foram criados
@@ -514,6 +677,101 @@ JanelaCriar() {
     g.Show("Hide")                 ; calcula o tamanho com todas as páginas visíveis
     MostrarPagina(PaginaAtual)
     return g
+}
+
+Secao(g, texto, y) {
+    g.SetFont("bold")
+    g.Add("Text", "x16 y" y " w220", texto)
+    g.SetFont("norm")
+}
+
+Vazio(g, texto, y) => g.Add("Text", "x16 y" y " w428 c" Paleta().sutil, texto)
+
+; "Ctrl+Alt+N mutes: [Checked apps | All apps]" à direita do título da seção.
+EscolhaAtalho(g, tipo, y) {
+    l := LISTAS[tipo]
+    tecla := AtalhoTexto(Cfg.atalhos[l.atalho])
+    g.Add("Text", "x170 y" (y + 3) " w140 Right c" Paleta().sutil, (tecla != "" ? tecla : "Hotkey") " mutes:")
+    dd := g.Add("DropDownList", "x316 y" y " w128 Choose" (Cfg.%l.todos% ? 2 : 1), ["Checked apps", "All apps"])
+    dd.OnEvent("Change", EscopoMudou.Bind(tipo))
+}
+
+; Uma linha: item = {tipo, chave, nome, icone, mudo, vol, presente}
+LinhaCriar(g, it, y) {
+    P := Paleta()
+    l := {item: it, cor: ""}
+    comVolume := (it.tipo = "sis" || it.tipo = "out")
+    mic := (it.tipo = "mic" || it.tipo = "in")
+
+    if LISTAS.Has(it.tipo) {        ; app: caixa "entra no atalho"
+        lst := LISTAS[it.tipo]
+        l.chk := g.Add("Checkbox", "x16 y" (y + 5) " w18 h20 Checked" Cfg.%lst.cfg%.Has(it.chave), "")
+        l.chk.Enabled := !Cfg.%lst.todos%
+        l.chk.OnEvent("Click", MarcarApp.Bind(it.tipo, it.chave))
+    }
+
+    if !it.presente {
+        g.Add("Text", "x110 y" y " w200 h28 0x4280 c" P.sutil, it.nome)        ; 0x4280 = centro, "...", sem &
+        g.Add("Text", "x316 y" y " w128 h28 0x200 Right c" P.sutil, "not running")
+        return Linhas[it.tipo "|" it.chave] := l
+    }
+
+    g.SetFont("s12", "Segoe MDL2 Assets")
+    l.btn := g.Add("Button", "x40 y" y " w36 h28", "")
+    l.btn.OnEvent("Click", LinhaMudo.Bind(it.tipo, it.chave))
+    icone := ""
+    if (it.icone != "")
+        try icone := g.Add("Picture", "x84 y" (y + 4) " w20 h20 Icon1", it.icone)
+    if !icone
+        g.Add("Text", "x84 y" (y + 3) " w22 h24 c" P.sutil, mic ? ICO_MIC : ICO_CAIXA)
+    g.SetFont("s10", "Segoe UI")
+
+    g.Add("Text", "x112 y" y " w" (comVolume ? 150 : 260) " h28 0x4280", it.nome)
+    if comVolume {
+        l.slider := g.Add("Slider", "x266 y" y " w128 h28 Range0-100 NoTicks Page10 ToolTip", it.vol)
+        l.slider.OnEvent("Change", LinhaVolume.Bind(it.tipo, it.chave))
+    }
+    l.estado := g.Add("Text", "x" (comVolume ? 396 : 376) " y" y " w" (comVolume ? 48 : 68) " h28 0x200 Right", "")
+    Linhas[it.tipo "|" it.chave] := l
+    LinhaAtualizar(l, it)
+}
+
+LinhaAtualizar(l, it) {
+    if !it.presente
+        return
+    P := Paleta()
+    l.item := it
+    mic := (it.tipo = "mic" || it.tipo = "in")
+    icone := it.mudo ? (mic ? ICO_MIC_MUDO : ICO_MUDO) : (mic ? ICO_MIC : ICO_SOM)
+    if (l.btn.Text != icone)
+        l.btn.Text := icone
+    if l.HasOwnProp("slider") && !GetKeyState("LButton") && (l.slider.Value != it.vol)
+        l.slider.Value := it.vol
+    texto := it.mudo ? "Muted" : (mic ? "Live" : it.vol "%")
+    cor := it.mudo ? P.mudo : (mic ? P.ativo : P.fg)
+    if (l.estado.Value != texto)
+        l.estado.Value := texto
+    if (l.cor != cor)
+        l.estado.SetFont("c" cor), l.cor := cor
+}
+
+MarcarApp(tipo, exe, caixa, *) {
+    sel := Cfg.%LISTAS[tipo].cfg%
+    if caixa.Value
+        sel[exe] := true
+    else if sel.Has(exe)
+        sel.Delete(exe)
+    ConfigSalvar()
+    AtualizarJanela()          ; app fechado desmarcado some da lista
+}
+
+EscopoMudou(tipo, dd, *) {
+    l := LISTAS[tipo]
+    Cfg.%l.todos% := (dd.Value = 2)
+    ConfigSalvar()
+    for , linha in Linhas
+        if (linha.item.tipo = tipo && linha.HasOwnProp("chk"))
+            linha.chk.Enabled := !Cfg.%l.todos%
 }
 
 MostrarPagina(n, *) {
@@ -535,107 +793,6 @@ Contar(g) {
     for , c in g
         n++
     return n
-}
-
-; Título em negrito de uma seção. primeiro = true no topo da página.
-Titulo(g, texto, primeiro := false) {
-    g.SetFont("bold")
-    g.Add("Text", (primeiro ? "x20 y55 Section" : "xs y+18 Section") " w490", texto)
-    g.SetFont("norm")
-}
-
-; Caixa "Todos" + lista com caixas de marcar.
-; A 3ª coluna (oculta) guarda a chave: id do microfone ou nome do .exe.
-CriarLista(g, nome, textoTodos, titulo, altura, P) {
-    g.Add("Checkbox", "xs vTodos" nome " Checked" Cfg.%"todos" nome%, textoTodos).OnEvent("Click", SalvarSelecao)
-    cor := Escuro ? " Background" P.lista " c" P.fg : ""
-    lv := g.Add("ListView", "xs w490 h" altura " Checked -Multi v" nome cor, [titulo, "State", "key"])
-    lv.ModifyCol(1, 330), lv.ModifyCol(2, 135), lv.ModifyCol(3, 0)
-    lv.OnEvent("ItemCheck", SalvarSelecao)
-}
-
-; Com "Todos" marcado a lista não importa: texto em cinza em vez de desabilitar
-; (lista desabilitada ignora a cor de fundo e fica clara no tema escuro).
-ListaApagada(lv, apagada) {
-    P := Paleta()
-    lv.Opt("c" (apagada ? P.sutil : P.fg))
-    lv.Redraw()
-}
-
-JanelaRecarregar() {
-    global Preenchendo := true
-    try {
-        PreencherLista(Janela["Mics"],    ItensMics(),        Cfg.mics,    "(microphone disconnected)")
-        PreencherLista(Janela["Apps"],    ItensApps(SAIDA),   Cfg.apps,    "")
-        PreencherLista(Janela["AppsMic"], ItensApps(ENTRADA), Cfg.appsMic, "")
-    } finally {
-        Preenchendo := false
-    }
-    for l in LISTAS
-        ListaApagada(Janela[l.ctrl], Cfg.%"todos" l.ctrl%)
-    AtualizarSistema()
-}
-
-; Itens selecionados que não estão presentes agora também aparecem, para poder desmarcar.
-PreencherLista(lv, itens, selecionados, nomeAusente) {
-    lv.Delete()
-    presentes := Map()
-    for it in itens {
-        presentes[it.chave] := true
-        lv.Add(selecionados.Has(it.chave) ? "Check" : "", it.nome, it.estado, it.chave)
-    }
-    for chave in selecionados
-        if !presentes.Has(chave)
-            lv.Add("Check", nomeAusente || chave, "not found", chave)
-}
-
-ItensMics() {
-    itens := []
-    for d in Dispositivos(ENTRADA) {
-        mudo := LerMudo(VT_ENDPOINT, Ativar(d.dev, IID_ENDPOINT))
-        itens.Push({chave: d.id, nome: d.nome, estado: mudo ? "Muted" : "Active"})
-    }
-    return itens
-}
-
-ItensApps(fluxo) {
-    porExe := Map()   ; um app pode ter várias sessões: mostra uma linha por .exe
-    for s in Sessoes(fluxo) {
-        estado := (LerMudo(VT_APP, s.vol) ? "Muted" : "Active") " · " Round(LerVolume(VT_APP, s.vol) * 100) "%"
-        porExe[s.exe] := {chave: s.exe, nome: s.exe, estado: estado}
-    }
-    itens := []
-    for , it in porExe
-        itens.Push(it)
-    return itens
-}
-
-AtualizarSistema() {
-    try {
-        Janela["SisVol"].Value := Round(SoundGetVolume())
-        Janela["SisEstado"].Value := "State: " (SoundGetMute() ? "Muted" : "Active")
-    } catch {
-        Janela["SisEstado"].Value := "No audio output found"
-    }
-}
-
-SalvarSelecao(*) {
-    if Preenchendo
-        return
-    for l in LISTAS {
-        Cfg.%"todos" l.ctrl% := Janela["Todos" l.ctrl].Value
-        Cfg.%l.cfg%       := Marcados(Janela[l.ctrl])
-        ListaApagada(Janela[l.ctrl], Cfg.%"todos" l.ctrl%)
-    }
-    ConfigSalvar()
-    BandejaAtualizar()
-}
-
-Marcados(lv) {
-    s := Map(), linha := 0
-    while linha := lv.GetNext(linha, "C")
-        s[lv.GetText(linha, 3)] := true
-    return s
 }
 
 SalvarOpcoes(*) {
@@ -661,10 +818,9 @@ SalvarOpcoes(*) {
     Cfg.tema    := tema
     ConfigSalvar()
 
-    if mudouTema {
+    if mudouTema
         AplicarModoApp()
-        SetTimer(JanelaReconstruir, -1)          ; fora deste evento, pois a janela é destruída
-    }
+    SetTimer(JanelaReconstruir, -1)              ; refaz fora deste evento (tema e nomes dos atalhos)
     Avisar("SETTINGS SAVED", "Lime")
 }
 
@@ -677,18 +833,18 @@ MontarBandeja() {
     m := A_TrayMenu
     m.Delete()
     m.Add("Open Audio", (*) => JanelaMostrar())
-    m.Add("Microphones: mute on/off", (*) => AlternarMudo("Mic"))
+    m.Add("Mute/unmute microphones", (*) => AlternarMudo("Mic"))
     m.Add()
     m.Add("Reload", (*) => Reload())
     m.Add("Exit", (*) => ExitApp())
     m.Default := "Open Audio"        ; duplo clique no ícone abre a janela
 }
 
-; O ícone mostra o estado dos microfones selecionados: X = mudo, visto = ativo
+; O ícone mostra o estado dos microfones: X = mudos, visto = ativos
 BandejaAtualizar() {
     a := Alvo("Mic")
     if !a.vols.Length
-        icone := 132, estado := "none selected"
+        icone := 132, estado := "none found"
     else if TodosMudos(a)
         icone := 132, estado := "MUTED"
     else

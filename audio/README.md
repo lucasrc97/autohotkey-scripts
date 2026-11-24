@@ -29,13 +29,15 @@ On Windows 11, Discord links its microphone to the device mute: muting or unmuti
 
 ## Window
 
-- **Microphone**: microphone devices (mute the whole device for every app) and the apps currently capturing the microphone.
-- **Mixer**: system output volume and mute, and the apps currently playing sound.
+- **Sound**: the output device and every app playing sound, each with a mute button and a volume slider.
+- **Microphone**: your microphones and every app using the microphone, each with a mute button and a Live/Muted state.
 - **Settings**: hotkeys, theme, beep and on-screen notice.
 
-Check the apps you want a hotkey to control, or tick **All apps**. An app only shows up in a list while it is using audio. Apps you checked earlier stay listed as "not found" so you can uncheck them.
+Next to each app, the checkbox decides whether the hotkey mutes it. The menu beside the section title switches the hotkey between **Checked apps** and **All apps**.
 
-The tray icon shows the state of the selected microphones. Double-click it to open the window. Right-click it to mute the microphones, reload or exit.
+Apps only show up while they use audio. An app you checked stays listed as "not running" after it closes, so you can uncheck it. The window refreshes by itself while it is open.
+
+The tray icon shows the state of your microphones. Double-click it to open the window. Right-click it to mute all microphones, reload or exit.
 
 ## Theme
 
