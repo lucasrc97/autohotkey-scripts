@@ -371,7 +371,9 @@ EscurecerJanela(g) {
             TemaControle(c.Hwnd, "DarkMode_Explorer")
         case "ListView":
             TemaControle(c.Hwnd, "DarkMode_Explorer")
-            TemaControle(SendMessage(0x101F, 0, 0, c), "DarkMode_ItemsView")   ; LVM_GETHEADER
+            cabecalho := SendMessage(0x101F, 0, 0, c)                        ; LVM_GETHEADER
+            TemaControle(cabecalho, "DarkMode_ItemsView")
+            ClarearCabecalho(c.Hwnd, cabecalho)
         case "DDL":
             TemaControle(c.Hwnd, "DarkMode_CFD")
         case "Checkbox":
@@ -381,7 +383,32 @@ EscurecerJanela(g) {
     }
 }
 
-TemaControle(hwnd, nome) => DllCall("uxtheme\SetWindowTheme", "Ptr", hwnd, "Str", nome, "Ptr", 0)
+; O tema escuro deixa o texto do cabeçalho da lista quase preto. A lista recebe o
+; NM_CUSTOMDRAW do cabeçalho; uma subclasse troca a cor do texto antes de desenhar.
+ClarearCabecalho(hwndLista, hwndCabecalho) => DllCall("comctl32\SetWindowSubclass", "Ptr", hwndLista, "Ptr", CabecalhoCallback(), "UPtr", 1, "UPtr", hwndCabecalho)
+
+CabecalhoCallback() {
+    static cb := CallbackCreate(CabecalhoSubclasse, , 6)
+    return cb
+}
+
+CabecalhoSubclasse(hwnd, msg, wParam, lParam, id, cabecalho) {
+    if (msg = 0x4E && NumGet(lParam, 0, "Ptr") = cabecalho
+        && NumGet(lParam, 2 * A_PtrSize, "Int") = -12) {                  ; WM_NOTIFY, NM_CUSTOMDRAW
+        estagio := NumGet(lParam, 3 * A_PtrSize, "UInt")
+        if (estagio = 1)                                                    ; CDDS_PREPAINT
+            return 0x20                                                     ; CDRF_NOTIFYITEMDRAW
+        if (estagio = 0x10001) {                                            ; CDDS_ITEMPREPAINT
+            DllCall("gdi32\SetTextColor", "Ptr", NumGet(lParam, 4 * A_PtrSize, "Ptr"), "UInt", 0xD0D0D0)
+            return 0                                                        ; CDRF_DODEFAULT
+        }
+    }
+    if (msg = 0x82)                                                         ; WM_NCDESTROY
+        DllCall("comctl32\RemoveWindowSubclass", "Ptr", hwnd, "Ptr", CabecalhoCallback(), "UPtr", id)
+    return DllCall("comctl32\DefSubclassProc", "Ptr", hwnd, "UInt", msg, "UPtr", wParam, "Ptr", lParam, "Ptr")
+}
+
+TemaControle(hwnd, nome) =>DllCall("uxtheme\SetWindowTheme", "Ptr", hwnd, "Str", nome, "Ptr", 0)
 
 
 ; ==============================================================================

@@ -23,6 +23,10 @@ You can change or clear the hotkeys in the **Settings** tab. Hotkeys are paused 
 
 Mute toggles as a group: if any selected item is active, all of them are muted. If all are muted, all are unmuted.
 
+Run only one copy of the script. Two copies, for example one on the Desktop and one in this folder, both react to each hotkey and undo each other.
+
+On Windows 11, Discord links its microphone to the device mute: muting or unmuting Discord's microphone in the list also mutes or unmutes the whole microphone. This is Discord/Windows behavior, not the script. Muting an app's sound never touches the microphone.
+
 ## Window
 
 - **Microphone**: microphone devices (mute the whole device for every app) and the apps currently capturing the microphone.
