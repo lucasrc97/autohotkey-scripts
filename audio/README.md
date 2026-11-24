@@ -1,0 +1,42 @@
+# Audio
+
+Mute microphones and app audio from a hotkey, without opening the Windows sound settings.
+
+The microphone mute is applied to the device itself, the same as the Windows "Mute" button, so the device stays active. Apps like Discord keep the microphone after you unmute.
+
+## Files
+
+| File | Purpose |
+| --- | --- |
+| `Audio.ahk` | The script. Run this one. |
+| `Lang.ahk` | Interface text (English and Portuguese). |
+| `Audio.ini` | Your settings. Created automatically, not tracked by git. |
+
+## Hotkeys
+
+| Default | Action |
+| --- | --- |
+| `Ctrl + Alt + G` | Open the window |
+| `Ctrl + Alt + H` | Mute/unmute the **microphone** of the selected apps |
+| `Ctrl + Alt + N` | Mute/unmute the **sound** of the selected apps |
+
+You can change or clear the hotkeys in the **Settings** tab. Hotkeys are paused while the window is focused, so a new hotkey can be recorded without triggering the old one.
+
+Mute toggles as a group: if any selected item is active, all of them are muted. If all are muted, all are unmuted.
+
+## Window
+
+- **Microphone**: microphone devices (mute the whole device for every app) and the apps currently capturing the microphone.
+- **Mixer**: system output volume and mute, and the apps currently playing sound.
+- **Settings**: hotkeys, language, theme, beep and on-screen notice.
+
+Check the apps you want a hotkey to control, or tick **All apps**. An app only shows up in a list while it is using audio. Apps you checked earlier stay listed as "not found" so you can uncheck them.
+
+The tray icon shows the state of the selected microphones. Double-click it to open the window. Right-click it to mute the microphones, reload or exit.
+
+## Language and theme
+
+- Language: English (default) or Portuguese.
+- Theme: follow the Windows setting (default), light or dark. In "follow system" mode the window switches by itself when the Windows theme changes.
+
+The hotkey input fields stay light in dark mode because Windows does not provide a dark style for that control.
