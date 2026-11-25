@@ -35,7 +35,7 @@ There is no per-app microphone mute. Windows ties every app's microphone mute to
 
 In the Sound tab, the checkbox next to each app decides whether the sound hotkey mutes it. The menu beside the section title switches the hotkey between **Checked apps** and **All apps**.
 
-Apps only show up while they use audio. An app you checked stays listed as "not running" after it closes, so you can uncheck it. The window refreshes by itself while it is open.
+Apps only show up while they use audio. Your checks are saved, so an app comes back checked the next time it plays sound. The window refreshes by itself while it is open.
 
 The tray icon shows the state of your microphones. Double-click it to open the window. Right-click it to mute all microphones, reload or exit.
 

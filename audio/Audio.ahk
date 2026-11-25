@@ -304,8 +304,8 @@ AppsNoMic() {
     return lista
 }
 
-; Uma linha por .exe (um app pode ter várias sessões). Apps marcados que não estão
-; usando áudio agora também aparecem, como "not running", para poder desmarcar.
+; Uma linha por .exe (um app pode ter várias sessões). Só aparecem apps usando
+; áudio agora; a marcação dos que fecharam continua salva no Audio.ini.
 ItensApps(tipo, fluxo) {
     porExe := Map()
     for s in Sessoes(fluxo) {
@@ -323,12 +323,6 @@ ItensApps(tipo, fluxo) {
     lista := []
     for , it in porExe
         lista.Push(it)
-    for exe in Cfg.%LISTAS[tipo].cfg%
-        if !porExe.Has(exe) {
-            info := InfoApp(exe, 0)
-            lista.Push({tipo: tipo, chave: exe, nome: info.nome, icone: info.caminho,
-                        presente: false, mudo: false, vol: 0})
-        }
     return lista
 }
 
@@ -660,8 +654,6 @@ JanelaCriar(e) {
         Vazio(g, "No app is using the microphone right now.", y), y += 30
     for it in e.inp
         LinhaCriar(g, it, y), y += 34
-    g.Add("Text", "x16 y" (y + 8) " w428 c" P.sutil,
-        "Windows can only mute the whole microphone, not a single app.")
     inicio.Push(Contar(g))
 
     ; --- Settings: atalhos + opções ---
@@ -733,12 +725,6 @@ LinhaCriar(g, it, y) {
         l.chk.OnEvent("Click", MarcarApp.Bind(it.tipo, it.chave))
     }
 
-    if !it.presente {
-        g.Add("Text", "x110 y" y " w200 h28 0x4280 c" P.sutil, it.nome)        ; 0x4280 = centro, "...", sem &
-        g.Add("Text", "x316 y" y " w128 h28 0x200 Right c" P.sutil, "not running")
-        return Linhas[it.tipo "|" it.chave] := l
-    }
-
     g.SetFont("s12", "Segoe MDL2 Assets")
     if (it.tipo != "uso") {           ; apps no microfone: sem botão de mudo
         l.btn := g.Add("Button", "x40 y" y " w36 h28", "")
@@ -751,7 +737,7 @@ LinhaCriar(g, it, y) {
         g.Add("Text", "x84 y" (y + 3) " w22 h24 c" P.sutil, mic ? ICO_MIC : ICO_CAIXA)
     g.SetFont("s10", "Segoe UI")
 
-    g.Add("Text", "x112 y" y " w" (comVolume ? 150 : 260) " h28 0x4280", it.nome)
+    g.Add("Text", "x112 y" y " w" (comVolume ? 150 : 260) " h28 0x4280", it.nome)   ; 0x4280 = centro, "...", sem &
     if (it.tipo = "uso") {
         g.Add("Text", "x376 y" y " w68 h28 0x200 Right c" P.sutil, "In use")
         return Linhas[it.tipo "|" it.chave] := l
@@ -791,7 +777,6 @@ MarcarApp(tipo, exe, caixa, *) {
     else if sel.Has(exe)
         sel.Delete(exe)
     ConfigSalvar()
-    AtualizarJanela()          ; app fechado desmarcado some da lista
 }
 
 EscopoMudou(tipo, dd, *) {
