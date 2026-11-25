@@ -6,7 +6,7 @@ A collection of [AutoHotkey v2](https://www.autohotkey.com/) scripts for Windows
 
 | Script | What it does |
 | --- | --- |
-| [audio](audio/) | Per-app volume and mute, microphone mute, and hotkeys to mute selected apps. |
+| [audio](audio/) | Per-app volume and mute, microphone mute, and hotkeys for both. |
 
 ## Requirements
 

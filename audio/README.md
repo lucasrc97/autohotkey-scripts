@@ -1,6 +1,6 @@
 # Audio
 
-Mute microphones and app audio from a hotkey, without opening the Windows sound settings.
+Mute your microphone and control each app's volume from a hotkey or a small mixer window, without opening the Windows sound settings.
 
 The microphone mute is applied to the device itself, the same as the Windows "Mute" button, so the device stays active. Apps like Discord keep the microphone after you unmute.
 
@@ -16,24 +16,24 @@ The microphone mute is applied to the device itself, the same as the Windows "Mu
 | Default | Action |
 | --- | --- |
 | `Ctrl + Alt + G` | Open the window |
-| `Ctrl + Alt + H` | Mute/unmute the **microphone** of the selected apps |
+| `Ctrl + Alt + H` | Mute/unmute the **microphone** (all microphones) |
 | `Ctrl + Alt + N` | Mute/unmute the **sound** of the selected apps |
 
 You can change or clear the hotkeys in the **Settings** tab. Hotkeys are paused while the window is focused, so a new hotkey can be recorded without triggering the old one.
 
-Mute toggles as a group: if any selected item is active, all of them are muted. If all are muted, all are unmuted.
+Mute toggles as a group: if any item is active, all of them are muted. If all are muted, all are unmuted.
 
 Run only one copy of the script. Two copies, for example one on the Desktop and one in this folder, both react to each hotkey and undo each other.
 
-On Windows 11, Discord links its microphone to the device mute: muting or unmuting Discord's microphone in the list also mutes or unmutes the whole microphone. This is Discord/Windows behavior, not the script. Muting an app's sound never touches the microphone.
+There is no per-app microphone mute. Windows ties every app's microphone mute to the device, so muting one app would mute the microphone for all of them. Windows microphone permissions can't help either: for regular desktop apps they are a single switch for all apps, not one per app.
 
 ## Window
 
 - **Sound**: the output device and every app playing sound, each with a mute button and a volume slider.
-- **Microphone**: your microphones and every app using the microphone, each with a mute button and a Live/Muted state.
+- **Microphone**: your microphones, each with a mute button and a Live/Muted state, and a list of the apps using the microphone right now.
 - **Settings**: hotkeys, theme, beep and on-screen notice.
 
-Next to each app, the checkbox decides whether the hotkey mutes it. The menu beside the section title switches the hotkey between **Checked apps** and **All apps**.
+In the Sound tab, the checkbox next to each app decides whether the sound hotkey mutes it. The menu beside the section title switches the hotkey between **Checked apps** and **All apps**.
 
 Apps only show up while they use audio. An app you checked stays listed as "not running" after it closes, so you can uncheck it. The window refreshes by itself while it is open.
 

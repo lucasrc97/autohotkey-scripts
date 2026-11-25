@@ -4,8 +4,8 @@ Persistent
 
 ; ==============================================================================
 ;  AUDIO
-;  Mudo e volume por app (som), mudo por app (microfone) e mudo dos
-;  microfones, com atalhos e uma janela de mixer. Configurações salvas em
+;  Mudo e volume por app (som) e mudo do microfone, com atalhos e uma
+;  janela de mixer. Configurações salvas em
 ;  Audio.ini (mesma pasta).
 ;
 ;  O mudo do microfone é feito no próprio dispositivo (IAudioEndpointVolume),
@@ -30,15 +30,14 @@ ARQ_INI := A_ScriptDir "\Audio.ini"
 ; ---------- Funções que podem ter atalho (esta ordem é a ordem na janela) ----------
 ACOES := [
     {id: "Abrir",      nome: "Open window",                    padrao: "^!g", fn: (*) => JanelaMostrar()},
-    {id: "AppMicMudo", nome: "Selected apps: mute microphone", padrao: "^!h", fn: (*) => AlternarMudo("AppMic")},
+    {id: "MicMudo",    nome: "Mute microphone",                padrao: "^!h", fn: (*) => AlternarMudo("Mic"), antigo: "AppMicMudo"},
     {id: "AppMudo",    nome: "Selected apps: mute sound",      padrao: "^!n", fn: (*) => AlternarMudo("App")}
 ]
 
 ; ---------- Apps que cada atalho controla ----------
 ; cfg = conjunto em Cfg | todos = "atalho vale para todos os apps" | ini = seção no Audio.ini
 LISTAS := Map(
-    "out", {cfg: "apps",    todos: "todosApps",    ini: "Apps",    atalho: "AppMudo"},
-    "in",  {cfg: "appsMic", todos: "todosAppsMic", ini: "AppsMic", atalho: "AppMicMudo"}
+    "out", {cfg: "apps", todos: "todosApps", ini: "Apps", atalho: "AppMudo"}
 )
 
 TEMAS := ["system", "light", "dark"]   ; ordem igual à da lista na janela
@@ -90,12 +89,12 @@ Alvo(tipo) {
         for d in Dispositivos(ENTRADA)
             vols.Push(Ativar(d.dev, IID_ENDPOINT))
         return {nome: "MICROPHONES", vt: VT_ENDPOINT, vols: vols}
-    case "App", "AppMic":
-        l := LISTAS[tipo = "App" ? "out" : "in"]
-        for s in Sessoes(tipo = "App" ? SAIDA : ENTRADA)
+    case "App":
+        l := LISTAS["out"]
+        for s in Sessoes(SAIDA)
             if Cfg.%l.todos% || Cfg.%l.cfg%.Has(s.exe)
                 vols.Push(s.vol)
-        return {nome: tipo = "App" ? "APPS (SOUND)" : "APPS (MIC)", vt: VT_APP, vols: vols}
+        return {nome: "APPS (SOUND)", vt: VT_APP, vols: vols}
     }
 }
 
@@ -123,8 +122,8 @@ VolsDaLinha(tipo, chave) {
         for d in Dispositivos(ENTRADA)
             if (d.id = chave)
                 vols.Push(Ativar(d.dev, IID_ENDPOINT))
-    case "out", "in":
-        for s in Sessoes(tipo = "in" ? ENTRADA : SAIDA)
+    case "out":
+        for s in Sessoes(SAIDA)
             if (s.exe = chave)
                 vols.Push(s.vol)
     }
@@ -285,8 +284,24 @@ LerEstado() {
                      mudo: LerMudo(VT_ENDPOINT, v), vol: 0})
     }
     e.out := ItensApps("out", SAIDA)
-    e.inp := ItensApps("in", ENTRADA)
+    e.inp := AppsNoMic()
     return e
+}
+
+; Apps captando o microfone agora. Só informação: o Windows não muta o microfone
+; de um app só (mutar a sessão de um app muta o dispositivo inteiro).
+AppsNoMic() {
+    porExe := Map()
+    for s in Sessoes(ENTRADA)
+        if !porExe.Has(s.exe) {
+            info := InfoApp(s.exe, s.pid)
+            porExe[s.exe] := {tipo: "uso", chave: s.exe, nome: info.nome, icone: info.caminho,
+                              presente: true, mudo: false, vol: 0}
+        }
+    lista := []
+    for , it in porExe
+        lista.Push(it)
+    return lista
 }
 
 ; Uma linha por .exe (um app pode ter várias sessões). Apps marcados que não estão
@@ -441,7 +456,8 @@ ConfigCarregar() {
         c.%l.cfg%   := Conjunto(IniRead(ARQ_INI, l.ini, "Selecionados", ""))
     }
     for a in ACOES
-        c.atalhos[a.id] := IniRead(ARQ_INI, "Atalhos", a.id, a.padrao)
+        c.atalhos[a.id] := IniRead(ARQ_INI, "Atalhos", a.id,
+            a.HasOwnProp("antigo") ? IniRead(ARQ_INI, "Atalhos", a.antigo, a.padrao) : a.padrao)
     return c
 }
 
@@ -455,6 +471,10 @@ ConfigSalvar() {
     }
     for a in ACOES
         IniWrite(Cfg.atalhos[a.id], ARQ_INI, "Atalhos", a.id)
+    ; limpa entradas de versões antigas
+    try IniDelete(ARQ_INI, "Atalhos", "AppMicMudo")
+    try IniDelete(ARQ_INI, "AppsMic")
+    try IniDelete(ARQ_INI, "Mics")
 }
 
 Conjunto(texto) {   ; "a|b|c" -> Map(a, b, c)
@@ -623,22 +643,25 @@ JanelaCriar(e) {
         LinhaCriar(g, it, y), y += 34
     inicio.Push(Contar(g))
 
-    ; --- Microphone: dispositivos + microfone de cada app ---
+    ; --- Microphone: mudo dos dispositivos + apps usando o microfone (só informação) ---
     y := 58
-    Secao(g, "Microphones", y), y += 28
+    Secao(g, "Microphones", y)
+    tecla := AtalhoTexto(Cfg.atalhos["MicMudo"])
+    if (tecla != "")
+        g.Add("Text", "x170 y" y " w274 Right c" P.sutil, tecla " mutes all microphones")
+    y += 28
     if !e.mics.Length
         Vazio(g, "No microphone found.", y), y += 30
     for it in e.mics
         LinhaCriar(g, it, y), y += 34
     y += 10
-    Secao(g, "Apps", y)
-    EscolhaAtalho(g, "in", y - 3), y += 30
+    Secao(g, "Apps using the microphone", y, 428), y += 28
     if !e.inp.Length
         Vazio(g, "No app is using the microphone right now.", y), y += 30
     for it in e.inp
         LinhaCriar(g, it, y), y += 34
     g.Add("Text", "x16 y" (y + 8) " w428 c" P.sutil,
-        "Some apps, like Discord, link their microphone to the device mute: muting one also mutes the other.")
+        "Windows can only mute the whole microphone, not a single app.")
     inicio.Push(Contar(g))
 
     ; --- Settings: atalhos + opções ---
@@ -679,9 +702,9 @@ JanelaCriar(e) {
     return g
 }
 
-Secao(g, texto, y) {
+Secao(g, texto, y, largura := 220) {
     g.SetFont("bold")
-    g.Add("Text", "x16 y" y " w220", texto)
+    g.Add("Text", "x16 y" y " w" largura, texto)
     g.SetFont("norm")
 }
 
@@ -701,7 +724,7 @@ LinhaCriar(g, it, y) {
     P := Paleta()
     l := {item: it, cor: ""}
     comVolume := (it.tipo = "sis" || it.tipo = "out")
-    mic := (it.tipo = "mic" || it.tipo = "in")
+    mic := (it.tipo = "mic" || it.tipo = "uso")
 
     if LISTAS.Has(it.tipo) {        ; app: caixa "entra no atalho"
         lst := LISTAS[it.tipo]
@@ -717,8 +740,10 @@ LinhaCriar(g, it, y) {
     }
 
     g.SetFont("s12", "Segoe MDL2 Assets")
-    l.btn := g.Add("Button", "x40 y" y " w36 h28", "")
-    l.btn.OnEvent("Click", LinhaMudo.Bind(it.tipo, it.chave))
+    if (it.tipo != "uso") {           ; apps no microfone: sem botão de mudo
+        l.btn := g.Add("Button", "x40 y" y " w36 h28", "")
+        l.btn.OnEvent("Click", LinhaMudo.Bind(it.tipo, it.chave))
+    }
     icone := ""
     if (it.icone != "")
         try icone := g.Add("Picture", "x84 y" (y + 4) " w20 h20 Icon1", it.icone)
@@ -727,6 +752,10 @@ LinhaCriar(g, it, y) {
     g.SetFont("s10", "Segoe UI")
 
     g.Add("Text", "x112 y" y " w" (comVolume ? 150 : 260) " h28 0x4280", it.nome)
+    if (it.tipo = "uso") {
+        g.Add("Text", "x376 y" y " w68 h28 0x200 Right c" P.sutil, "In use")
+        return Linhas[it.tipo "|" it.chave] := l
+    }
     if comVolume {
         l.slider := g.Add("Slider", "x266 y" y " w128 h28 Range0-100 NoTicks Page10 ToolTip", it.vol)
         l.slider.OnEvent("Change", LinhaVolume.Bind(it.tipo, it.chave))
@@ -737,11 +766,11 @@ LinhaCriar(g, it, y) {
 }
 
 LinhaAtualizar(l, it) {
-    if !it.presente
+    if !it.presente || !l.HasOwnProp("btn")
         return
     P := Paleta()
     l.item := it
-    mic := (it.tipo = "mic" || it.tipo = "in")
+    mic := (it.tipo = "mic")
     icone := it.mudo ? (mic ? ICO_MIC_MUDO : ICO_MUDO) : (mic ? ICO_MIC : ICO_SOM)
     if (l.btn.Text != icone)
         l.btn.Text := icone
